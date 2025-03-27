@@ -4,10 +4,7 @@ use std::{
 	io::{BufReader, Read},
 };
 
-use binarygcode::{
-	block::{Block, CompressionAlgorithm},
-	file_header::FileHeader,
-};
+use binarygcode::{deserialiser::BlockDeserialiser, header::FileHeader};
 
 fn main() {
 	let mut path = env::current_dir().unwrap();
@@ -21,20 +18,16 @@ fn main() {
 	let file_header = FileHeader::from_bytes(&file_header_bytes).unwrap();
 	println!("{:?}", file_header);
 
-	let mut block_header_bytes = [0u8; 12];
-	while reader.read_exact(block_header_bytes.as_mut_slice()).is_ok() {
-		let block = Block::read_header(&block_header_bytes).unwrap();
-
+	let mut block = BlockDeserialiser::new(file_header.checksum);
+	while reader.read_exact(block.header_buf()).is_ok() {
 		println!("{:?}", block);
-		// Must seek back as the header would have been only 8.
-		if block.compression == CompressionAlgorithm::None {
-			println!("Stepping back");
-			reader.seek_relative(-4).unwrap();
-		}
 
-		let size = block.block_size(&file_header.checksum);
-		println!("Block Size: {}", size);
-		let size: i64 = size.try_into().unwrap();
-		reader.seek_relative(size).unwrap();
+		let data_buf = block.data_buf().unwrap();
+		reader.read_exact(data_buf).unwrap();
+		println!(
+			"{:?} {}",
+			block.kind().unwrap(),
+			block.block_size().unwrap()
+		);
 	}
 }

@@ -6,8 +6,8 @@ use std::{
 };
 
 use binarygcode::{
-	block::{BlockDeserialiser, BlockKind},
-	file_header::FileHeader,
+	deserialiser::{BlockDeserialiser, BlockKind},
+	header::FileHeader,
 };
 
 fn main() {
