@@ -1,3 +1,4 @@
+/*
 #[derive(Debug, PartialEq)]
 pub enum FileChecksum {
 	None,
@@ -55,6 +56,10 @@ impl FileHeader {
 			version,
 			checksum,
 		}
+	}
+
+	pub fn create_header_buf() -> [u8; 10] {
+		[0u8; 10]
 	}
 
 	pub fn from_bytes(bytes: &[u8; 10]) -> Result<Self, FileHeaderError> {
@@ -151,3 +156,4 @@ mod tests {
 		assert_eq!(bytes, [71, 67, 68, 69, 1, 0, 0, 0, 1, 0])
 	}
 }
+*/

@@ -4,3 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+embedded-heatshrink = "0.1.0"
+miniz_oxide = "0.8.5"
+
+[dev-dependencies]
+meatpack = "0.0.1"
