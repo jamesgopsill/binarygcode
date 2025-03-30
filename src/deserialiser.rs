@@ -1,13 +1,15 @@
 use alloc::vec::Vec;
-use core::array::TryFromSliceError;
-use embedded_heatshrink::{HSDPollRes, HSEPollRes, HeatshrinkDecoder};
+use embedded_heatshrink::{HSDPollRes, HeatshrinkDecoder};
 use miniz_oxide::inflate::decompress_to_vec_zlib;
 
 use crate::common::{
-	try_from_slice, BinaryGcodeChecksum, BinaryGcodeError, BlockKind, CompressionAlgorithm,
+	crc32, try_from_slice, BinaryGcodeChecksum, BinaryGcodeError, BlockKind, CompressionAlgorithm,
 	Encoding, MAGIC,
 };
 
+/// A binarygcode deserialiser that can parse a bgcode file. It can
+/// separately read block headers and content so you can choose what
+/// data you want to parse when reading the file.
 #[derive(Debug)]
 pub struct Deserialiser {
 	pub magic: u32,
@@ -42,12 +44,11 @@ impl Deserialiser {
 		let bytes = try_from_slice::<2>(&header_bytes[8..=9])?;
 		let checksum_value = u16::from_le_bytes(bytes);
 
-		let mut checksum: BinaryGcodeChecksum;
-		match checksum_value {
-			1 => checksum = BinaryGcodeChecksum::Crc32,
-			0 => checksum = BinaryGcodeChecksum::None,
-			_ => return Err(BinaryGcodeError::InvalidChecksum),
-		}
+		let checksum = match checksum_value {
+			1 => BinaryGcodeChecksum::Crc32,
+			0 => BinaryGcodeChecksum::None,
+			_ => return Err(BinaryGcodeError::InvalidChecksumType),
+		};
 
 		let s = Self {
 			magic,
@@ -59,26 +60,31 @@ impl Deserialiser {
 		Ok(s)
 	}
 
+	/// A utility function that creates a buffer of the size of the file header
+	/// so it can be read into and passed to a new instance of Deserialiser.
 	pub fn fh_buf() -> [u8; 10] {
 		[0u8; 10]
 	}
 
+	/// Returns the type of block that is currently in the deserialiser buffer.
 	pub fn kind(&self) -> Result<BlockKind, BinaryGcodeError> {
 		let bytes = try_from_slice::<2>(&self.buf[0..=1])?;
 		BlockKind::from_le_bytes(bytes)
 	}
 
+	/// Returns the compression alogrithm being used by the current block in the
+	/// deserialiser buffer.
 	pub fn compression(&self) -> Result<CompressionAlgorithm, BinaryGcodeError> {
 		let bytes = try_from_slice::<2>(&self.buf[2..=3])?;
 		CompressionAlgorithm::from_le_bytes(bytes)
 	}
 
+	/// Returns the encoding used by the current block in the deserialiser buffer.
 	pub fn encoding(&self) -> Result<Encoding, BinaryGcodeError> {
-		let mut start: usize;
-		match self.compression()? {
-			CompressionAlgorithm::None => start = 8,
-			_ => start = 12,
-		}
+		let start = match self.compression()? {
+			CompressionAlgorithm::None => 8,
+			_ => 12,
+		};
 		let end = start + 2;
 
 		let encoding = &self.buf[start..end];
@@ -101,6 +107,7 @@ impl Deserialiser {
 		}
 	}
 
+	/// Returns the compressed size of the block in the deserialiser buffer.
 	pub fn compressed_size(&self) -> Result<usize, BinaryGcodeError> {
 		let ca = self.compression()?;
 		match ca {
@@ -112,11 +119,14 @@ impl Deserialiser {
 		}
 	}
 
+	/// Returns the uncompressed size of the block in the deserialiser buffer.
 	pub fn uncompressed_size(&self) -> Result<usize, BinaryGcodeError> {
 		let bytes = try_from_slice::<4>(&self.buf[4..=7])?;
 		Ok(u32::from_le_bytes(bytes) as usize)
 	}
 
+	/// Returns the size of the block (minus header) that can be used to skip
+	/// forward in reading the file if you do not want to process it.
 	pub fn block_size(&self) -> Result<usize, BinaryGcodeError> {
 		let mut size: usize = 0;
 		size += self.kind()?.parameter_byte_size();
@@ -132,6 +142,8 @@ impl Deserialiser {
 		Ok(size)
 	}
 
+	/// A utility function resetting the internal buffer for a new block that
+	/// starts with a buffer size suitable for a new block header to be read into.
 	pub fn block_header_buf(&mut self) -> &mut [u8] {
 		self.buf = Vec::with_capacity(12);
 		for _ in 0..self.buf.capacity() {
@@ -140,6 +152,8 @@ impl Deserialiser {
 		self.buf.as_mut()
 	}
 
+	/// A utility function that reserve the exact memory required to read in the
+	/// block data given the header information provided previously.
 	pub fn block_data_buf(&mut self) -> Result<&mut [u8], BinaryGcodeError> {
 		let additional = self.block_size()?;
 		self.buf.reserve_exact(additional);
@@ -150,6 +164,7 @@ impl Deserialiser {
 		Ok(slice)
 	}
 
+	/// Deserialise a blocks data and return it as `Vec<u8>`.
 	pub fn deserialise(&self) -> Result<Vec<u8>, BinaryGcodeError> {
 		// Check the expected and received lengths
 		// The user may have forgotten to read in the data
@@ -158,51 +173,61 @@ impl Deserialiser {
 			return Err(BinaryGcodeError::DataLengthMissMatch);
 		}
 
-		let (data, checksum) = self.data_checksum_slices()?;
-		if let Some(c) = checksum {
-			// TODO: checksum check
-			// May also need to cover the parameters.
+		let ss = self.slice_set()?;
+		if let Some(c) = ss.checksum {
+			let c = try_from_slice::<4>(&c[..4]).unwrap();
+			let c = u32::from_le_bytes(c);
+			let chk = crc32(ss.block);
+			if c != chk {
+				return Err(BinaryGcodeError::InvalidChecksum(c, chk));
+			}
 		}
 
-		// Deal with the data
-		let data = self.deserialise_data(data)?;
+		// Decompress the data
+		let data = self.decompress(ss.data)?;
 		Ok(data)
 	}
 
-	fn data_checksum_slices(&self) -> Result<(&[u8], Option<&[u8]>), BinaryGcodeError> {
-		//Result<(&[u8], &[u8], Option<&[u8]>), BinaryGcodeError> {
-		let mut start: usize;
-		match self.compression()? {
-			CompressionAlgorithm::None => start = 8,
-			_ => start = 12,
-		}
-		let mut end = start;
+	/// A utility function that generates the slices for the entire block, parameter,
+	/// data, and checksum sections.
+	fn slice_set(&self) -> Result<SliceSet, BinaryGcodeError> {
+		let parameter_start = match self.compression()? {
+			CompressionAlgorithm::None => 8,
+			_ => 12,
+		};
+		let mut data_start = parameter_start;
 		match self.kind()? {
-			BlockKind::Thumbnail => end += 6,
-			_ => end += 2,
+			BlockKind::Thumbnail => data_start += 6,
+			_ => data_start += 2,
 		}
 
 		// Now for the data and checksum slices
-		start = end;
-		let mut data: &[u8];
-		let mut checksum: Option<&[u8]>;
+		let block = &self.buf[..self.buf.len() - 4];
+		let data: &[u8];
+		let checksum: Option<&[u8]>;
 
 		match self.checksum {
 			BinaryGcodeChecksum::None => {
-				data = &self.buf[start..];
+				data = &self.buf[data_start..];
 				checksum = None;
 			}
 			BinaryGcodeChecksum::Crc32 => {
-				end = self.buf.len() - 4;
-				data = &self.buf[start..end];
+				let end = self.buf.len() - 4;
+				data = &self.buf[data_start..end];
 				checksum = Some(&self.buf[end..]);
 			}
 		}
 
-		Ok((data, checksum))
+		Ok(SliceSet {
+			data,
+			block,
+			checksum,
+		})
 	}
 
-	fn deserialise_data(
+	/// Internal function to decompress the data given the
+	/// compression algorithm.
+	fn decompress(
 		&self,
 		input: &[u8],
 	) -> Result<Vec<u8>, BinaryGcodeError> {
@@ -227,6 +252,7 @@ impl Deserialiser {
 		}
 	}
 
+	/// An internal function wrapping around the heatshrink decoder.
 	fn heatshrink(
 		&self,
 		input: &[u8],
@@ -250,11 +276,17 @@ impl Deserialiser {
 	}
 }
 
+/// An internal utility struct containing the various slices
+/// of the buffer that represent different sections of a block.
+struct SliceSet<'a> {
+	data: &'a [u8],
+	block: &'a [u8],
+	checksum: Option<&'a [u8]>,
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
-
-	use super::Deserialiser;
 
 	#[test]
 	fn test_valid_file_header_crc() {

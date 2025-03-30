@@ -1,7 +1,17 @@
 [package]
 name = "binarygcode"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2021"
+license = "MIT"
+authors = ["James Gopsill"]
+description = "A Rust implementation of libbgcode to serialise and deserialise binary gcode."
+repository = "https://github.com/jamesgopsill/binarygcode"
+readme = "README.md"
+keywords = ["gcode", "MEX", "FDM", "3d_printing"]
+documentation = "https://docs.rs/binarygcode"
+license-file = "LICENSE"
+categories = ["no-std", "parsing"]
+exclude = ["/tmp", "/test_files"]
 
 [dependencies]
 embedded-heatshrink = "0.1.0"
