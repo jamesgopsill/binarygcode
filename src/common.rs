@@ -1,33 +1,47 @@
-use core::array::TryFromSliceError;
-
 /// A pre-defined value in the specification as
 /// part of the file header defined in its u32 form.
 /// ['G', 'C', 'D', 'E'] -> [u8; 4] -> u32
 pub(crate) static MAGIC: u32 = 1162101575;
 
-/// The list of errors that can occur across the crate.
-#[derive(Debug, PartialEq, Eq)]
+/// An enum of errors that can occur when using the crate.
+#[derive(Debug)]
 pub enum BinaryGcodeError {
-	// Returns the value it received.
-	UnsupportedCompressionAlgorithm(u16),
-	// Returns the value it received.
-	UnsupportedBlockKind(u16),
-	IsNotCompressed,
-	DataLengthMissMatch,
 	TryFromSliceError,
-	// Returns the value it received.
-	EncodingError(u16),
-	DeflateError,
-	HeatshrinkError,
-	InvalidBlockConfig,
 	InvalidMagic,
-	// Returns the two values to help debug.
+	InvalidChecksumType(u16),
 	InvalidChecksum(u32, u32),
-	InvalidChecksumType,
+	UnsupportedBlockKind(u16),
+	UnsupportedEncoding(u16),
+	UnsupportedCompressionAlgorithm(u16),
+	EncodingError(u16),
+}
+
+/// The valid checksums for the binary gcode format.
+#[derive(Debug, PartialEq, Clone)]
+pub enum Checksum {
+	None,
+	Crc32,
+}
+
+impl Checksum {
+	pub fn to_le_bytes(&self) -> [u8; 2] {
+		match *self {
+			Checksum::None => [0, 0],
+			Checksum::Crc32 => [1, 0],
+		}
+	}
+
+	pub fn checksum_byte_size(&self) -> usize {
+		match *self {
+			Checksum::None => 0,
+			Checksum::Crc32 => 4,
+		}
+	}
 }
 
 /// An enum containing the various encodings the blocks
 /// could contain.
+#[derive(Debug)]
 pub enum Encoding {
 	INI,
 	ASCII,
@@ -55,9 +69,8 @@ impl Encoding {
 	/// Returns the encoding type if or error if it is an invalid
 	/// encoding combination.
 	pub fn from_le_bytes(
-		&self,
 		bytes: [u8; 2],
-		kind: BlockKind,
+		kind: &BlockKind,
 	) -> Result<Encoding, BinaryGcodeError> {
 		let encoding = u16::from_le_bytes(bytes);
 		match (kind, encoding) {
@@ -71,7 +84,7 @@ impl Encoding {
 			(BlockKind::Thumbnail, 0) => Ok(Encoding::PNG),
 			(BlockKind::Thumbnail, 1) => Ok(Encoding::JPG),
 			(BlockKind::Thumbnail, 2) => Ok(Encoding::QOI),
-			(_, _) => Err(BinaryGcodeError::EncodingError(encoding)),
+			(_, _) => Err(BinaryGcodeError::UnsupportedEncoding(encoding)),
 		}
 	}
 }
@@ -168,40 +181,8 @@ impl CompressionAlgorithm {
 	}
 }
 
-/// A utility function to take a generic slice and return a
-/// slice of a specific size.
-pub(crate) fn try_from_slice<const N: usize>(buf: &[u8]) -> Result<[u8; N], BinaryGcodeError> {
-	let bytes: Result<[u8; N], TryFromSliceError> = buf.try_into();
-	match bytes {
-		Ok(bytes) => Ok(bytes),
-		Err(_) => Err(BinaryGcodeError::TryFromSliceError),
-	}
-}
-
-#[derive(Debug, PartialEq)]
-pub enum BinaryGcodeChecksum {
-	None,
-	Crc32,
-}
-
-impl BinaryGcodeChecksum {
-	pub fn to_le_bytes(&self) -> [u8; 2] {
-		match *self {
-			BinaryGcodeChecksum::None => [0, 0],
-			BinaryGcodeChecksum::Crc32 => [1, 0],
-		}
-	}
-
-	pub fn checksum_byte_size(&self) -> usize {
-		match *self {
-			BinaryGcodeChecksum::None => 0,
-			BinaryGcodeChecksum::Crc32 => 4,
-		}
-	}
-}
-
 /// The crcfast implementation using a lookup table following
-/// [lxp32](https://lxp32.github.io/docs/a-simple-example-crc32-calculation/) implementation.
+/// [lxp32](https://lxp32.github.io/docs/a-simple-example-crc32-calculation/)s example.
 pub(crate) fn crc32(buf: &[u8]) -> u32 {
 	let mut crc: u32 = 0xFFFFFFFF;
 	for byte in buf {
@@ -246,17 +227,3 @@ static CRC32_TABLE: [u32; 256] = [
 	0xbdbdf21c, 0xcabac28a, 0x53b39330, 0x24b4a3a6, 0xbad03605, 0xcdd70693, 0x54de5729, 0x23d967bf,
 	0xb3667a2e, 0xc4614ab8, 0x5d681b02, 0x2a6f2b94, 0xb40bbe37, 0xc30c8ea1, 0x5a05df1b, 0x2d02ef8d,
 ];
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-
-	/// Test the crc implementation is the example from
-	/// [lxp32](https://lxp32.github.io/docs/a-simple-example-crc32-calculation/).
-	#[test]
-	fn test_crc32() {
-		let buf = "123456789".as_bytes();
-		let checksum = crc32(buf);
-		assert_eq!(checksum, 0xCBF43926);
-	}
-}

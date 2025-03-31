@@ -1,13 +1,13 @@
-use core::str;
 use std::{
 	env,
 	fs::File,
 	io::{BufReader, Read},
+	str,
 };
 
 use binarygcode::{
 	common::{BlockKind, Encoding},
-	deserialiser::Deserialiser,
+	deserialiser::{DeserialisedBlock, DeserialisedResult, Deserialiser},
 };
 use meatpack::{MeatPackResult, Unpacker};
 
@@ -21,92 +21,102 @@ fn main() {
 	let file = File::open(path).unwrap();
 	let mut reader = BufReader::new(file);
 
-	// Read the file header bytes.
-	let mut fh_buf = Deserialiser::fh_buf();
-	reader.read_exact(fh_buf.as_mut_slice()).unwrap();
-	let mut deserialiser = Deserialiser::new(&fh_buf).unwrap();
-	println!(
-		"File Version: {}, Checksum: {:?}",
-		deserialiser.version, deserialiser.checksum
-	);
+	// Initialise the deserialiser
+	let mut deserialiser = Deserialiser::default();
 
-	// Read each block into the deserialisers internal buf.
-	// Processing one at a time. Each loop removes the previous
-	// block from the internal buffer and adds the next one
-	// until we reach EOF.
-	while reader.read_exact(deserialiser.block_header_buf()).is_ok() {
-		println!(
-			"## New Block ##\n{:?} {}",
-			deserialiser.kind().unwrap(),
-			deserialiser.block_size().unwrap()
-		);
+	// Initialise the read buffer. This could be reading from a file
+	// or waiting for intermittent bytes from a network transfer.
+	let mut buf = [0u8; 256];
 
-		// Get a buffer of the right size for the data
-		// expected by the block and fill it with the mechanism
-		// you're retrieving you data from. For example, a file I/O or
-		// data stream.
-		let data_buf = deserialiser.block_data_buf().unwrap();
-		reader.read_exact(data_buf).unwrap();
+	loop {
+		// Read bytes into the buffer
+		let read = reader.read(buf.as_mut_slice()).unwrap();
+		// Exit when exhausted
+		if read == 0 {
+			break;
+		}
+		// Provide the read bytes to the deserialiser
+		deserialiser.digest(&buf[..read]);
 
-		let data = deserialiser.deserialise().unwrap();
-
-		// Decide what you want to do with the data.
-		match deserialiser.kind().unwrap() {
-			BlockKind::FileMetadata => {
-				let s = str::from_utf8(&data).unwrap();
-				println!("{:?}", s);
-			}
-			BlockKind::PrinterMetadata => {
-				let s = str::from_utf8(&data).unwrap();
-				println!("{:?}", s);
-			}
-			BlockKind::PrintMetadata => {
-				let s = str::from_utf8(&data).unwrap();
-				println!("{:?}", s);
-			}
-			BlockKind::GCode => match deserialiser.encoding().unwrap() {
-				Encoding::ASCII => {
-					let s = str::from_utf8(&data).unwrap();
-					println!("{:?}", s);
+		// Loop through running deserialise on the deserialisers inner
+		// buffer with it returning either a header, block or request for more bytes.
+		// Or an error when deserialising.
+		loop {
+			let r = deserialiser.deserialise().unwrap();
+			match r {
+				DeserialisedResult::FileHeader(fh) => {
+					println!("{:?}", fh);
 				}
-				Encoding::Meatpack => {
-					// Use the Meatpack crate to re-encode back to ASCII Gcode.
-					let mut unpacker = Unpacker::<64>::default();
-					for byte in data {
-						let res = unpacker.unpack(&byte);
-						match res {
-							Ok(MeatPackResult::WaitingForNextByte) => {}
-							Ok(MeatPackResult::Line(line)) => {
-								let s = str::from_utf8(line).unwrap();
-								println!("{:?}", s);
-							}
-							Err(e) => {
-								println!("{:?}", e);
-							}
+				DeserialisedResult::Block(b) => {
+					println!("{}", b);
+					print_block_contents(&b);
+				}
+				DeserialisedResult::MoreBytesRequired(_) => {
+					break;
+				}
+			}
+		}
+	}
+}
+
+// Prints the contents of the block
+fn print_block_contents(b: &DeserialisedBlock) {
+	let data = b.decompress().unwrap();
+	match b.kind {
+		BlockKind::FileMetadata => {
+			let s = str::from_utf8(&data).unwrap();
+			println!("{:?}", s);
+		}
+		BlockKind::PrinterMetadata => {
+			let s = str::from_utf8(&data).unwrap();
+			println!("{:?}", s);
+		}
+		BlockKind::PrintMetadata => {
+			let s = str::from_utf8(&data).unwrap();
+			println!("{:?}", s);
+		}
+		BlockKind::GCode => match b.encoding {
+			Encoding::ASCII => {
+				let s = str::from_utf8(&data).unwrap();
+				println!("{:?}", s);
+			}
+			Encoding::Meatpack => {
+				// Use the Meatpack crate to re-encode back to ASCII Gcode.
+				let mut unpacker = Unpacker::<64>::default();
+				for byte in data {
+					let res = unpacker.unpack(&byte);
+					match res {
+						Ok(MeatPackResult::WaitingForNextByte) => {}
+						Ok(MeatPackResult::Line(line)) => {
+							let s = str::from_utf8(line).unwrap();
+							println!("{:?}", s);
+						}
+						Err(e) => {
+							println!("{:?}", e);
 						}
 					}
 				}
-				Encoding::MeatpackWithComments => {
-					let mut unpacker = Unpacker::<64>::default();
-					for byte in data {
-						let res = unpacker.unpack(&byte);
-						match res {
-							Ok(MeatPackResult::WaitingForNextByte) => {}
-							Ok(MeatPackResult::Line(line)) => {
-								let s = str::from_utf8(line).unwrap();
-								println!("{:?}", s);
-							}
-							Err(e) => {
-								println!("{:?}", e);
-							}
+			}
+			Encoding::MeatpackWithComments => {
+				let mut unpacker = Unpacker::<64>::default();
+				for byte in data {
+					let res = unpacker.unpack(&byte);
+					match res {
+						Ok(MeatPackResult::WaitingForNextByte) => {}
+						Ok(MeatPackResult::Line(line)) => {
+							let s = str::from_utf8(line).unwrap();
+							println!("{:?}", s);
+						}
+						Err(e) => {
+							println!("{:?}", e);
 						}
 					}
 				}
-				_ => {}
-			},
-			_ => {
-				println!("Data Length: {}", data.len());
 			}
+			_ => {}
+		},
+		_ => {
+			println!("Data Length: {}", data.len());
 		}
 	}
 }

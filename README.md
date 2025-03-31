@@ -27,14 +27,19 @@ The crate is still under construction. So far we have managed to complete...
 
 Examples can be found in the `examples` folder. Below is an example of reading the headers
 
-``` rust
+```rust
 use std::{
 	env,
 	fs::File,
 	io::{BufReader, Read},
+	str,
 };
 
-use binarygcode::deserialiser::Deserialiser;
+use binarygcode::{
+	common::{BlockKind, Encoding},
+	deserialiser::{DeserialisedBlock, DeserialisedResult, Deserialiser},
+};
+use meatpack::{MeatPackResult, Unpacker};
 
 fn main() {
 	// Create the path to the gcode file
@@ -46,30 +51,40 @@ fn main() {
 	let file = File::open(path).unwrap();
 	let mut reader = BufReader::new(file);
 
-	// Initialise the deserialiser by reading in the file header.
-	let mut fh_buf = Deserialiser::fh_buf();
-	reader.read_exact(fh_buf.as_mut_slice()).unwrap();
-	let mut deserialiser = Deserialiser::new(&fh_buf).unwrap();
-	println!(
-		"File Version: {}, Checksum: {:?}",
-		deserialiser.version, deserialiser.checksum
-	);
+	// Initialise the deserialiser
+	let mut deserialiser = Deserialiser::default();
 
-	// Read each block into the deserialisers internal buf.
-	// Processing one at a time. Each loop removes the previous
-	// block from the internal buffer and adds the next one
-	// until we reach EOF.
-	let mut n = 0;
-	while reader.read_exact(deserialiser.block_header_buf()).is_ok() {
-		println!(
-			"{} {:?} {}",
-			n,
-			deserialiser.kind().unwrap(),
-			deserialiser.block_size().unwrap()
-		);
-		let block_size = deserialiser.block_size().unwrap();
-		reader.seek_relative(block_size as i64).unwrap();
-		n += 1;
+	// Initialise the read buffer. This could be reading from a file
+	// or waiting for intermittent bytes from a network transfer.
+	let mut buf = [0u8; 256];
+
+	loop {
+		// Read bytes into the buffer
+		let read = reader.read(buf.as_mut_slice()).unwrap();
+		// Exit when exhausted
+		if read == 0 {
+			break;
+		}
+		// Provide the read bytes to the deserialiser
+		deserialiser.digest(&buf[..read]);
+
+		// Loop through running deserialise on the deserialisers inner
+		// buffer with it returning either a header, block or request for more bytes.
+		// Or an error when deserialising.
+		loop {
+			let r = deserialiser.deserialise().unwrap();
+			match r {
+				DeserialisedResult::FileHeader(fh) => {
+					println!("{:?}", fh);
+				}
+				DeserialisedResult::Block(b) => {
+					println!("{}", b);
+				}
+				DeserialisedResult::MoreBytesRequired(_) => {
+					break;
+				}
+			}
+		}
 	}
 }
 ```
