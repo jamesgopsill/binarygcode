@@ -31,8 +31,7 @@ pub struct DeserialisedFileHeader {
 	pub checksum: Checksum,
 }
 
-/// A utility function to take a generic slice and return a
-/// slice of a specific size.
+/// A utility function to take a generic slice and return a slice of a specific size.
 pub(crate) fn try_from_slice<const N: usize>(buf: &[u8]) -> Result<[u8; N], BinaryGcodeError> {
 	let bytes: Result<[u8; N], TryFromSliceError> = buf.try_into();
 	match bytes {
