@@ -6,3 +6,6 @@ extern crate alloc;
 
 pub mod common;
 pub mod deserialiser;
+
+#[cfg(test)]
+mod tests;
