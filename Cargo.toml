@@ -2,18 +2,22 @@
 name = "binarygcode"
 version = "0.0.2"
 edition = "2021"
+
 license = "MIT"
 authors = ["James Gopsill"]
 description = "A Rust implementation of libbgcode to serialise and deserialise binary gcode."
 repository = "https://github.com/jamesgopsill/binarygcode"
 readme = "README.md"
-keywords = ["gcode", "MEX", "FDM", "3d_printing"]
+keywords = ["gcode", "MEX", "FDM", "3d_printing", "deserialise", "serialise"]
 documentation = "https://docs.rs/binarygcode"
-categories = ["no-std", "parsing"]
+categories = ["no-std", "parsing", "parser-implementations", "compression"]
 exclude = ["/tmp", "/test_files"]
 
 [dependencies]
 embedded-heatshrink = "0.1.0"
-miniz_oxide = "0.8.5"
 meatpack = { version = "0.0.2", features = ["alloc"] }
 base64 = { version = "0.22.1", default-features = false, features = ["alloc"] }
+miniz_oxide = "0.8.8"
+
+[dev-dependencies]
+meatpack = "0.0.2"

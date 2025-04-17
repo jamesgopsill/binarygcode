@@ -26,14 +26,14 @@ pub enum Checksum {
 }
 
 impl Checksum {
-	pub fn to_le_bytes(&self) -> [u8; 2] {
+	pub const fn to_le_bytes(&self) -> [u8; 2] {
 		match *self {
 			Checksum::None => 0u16.to_be_bytes(),
 			Checksum::Crc32 => 1u16.to_le_bytes(),
 		}
 	}
 
-	pub fn checksum_byte_size(&self) -> usize {
+	pub const fn checksum_byte_size(&self) -> usize {
 		match *self {
 			Checksum::None => 0,
 			Checksum::Crc32 => 4,
@@ -56,7 +56,7 @@ pub enum Encoding {
 
 impl Encoding {
 	/// Returns the binary representation of the encoding.
-	pub fn to_le_bytes(&self) -> [u8; 2] {
+	pub const fn to_le_bytes(&self) -> [u8; 2] {
 		match *self {
 			Encoding::INI => 0u16.to_le_bytes(),
 			Encoding::ASCII => 0u16.to_le_bytes(),
@@ -70,7 +70,7 @@ impl Encoding {
 
 	/// Returns the encoding type if or error if it is an invalid
 	/// encoding combination.
-	pub fn from_le_bytes(
+	pub const fn from_le_bytes(
 		bytes: [u8; 2],
 		kind: &BlockKind,
 	) -> Result<Encoding, BinaryGcodeError> {
@@ -105,7 +105,7 @@ pub enum BlockKind {
 
 impl BlockKind {
 	/// Return a BlockKind based on a u16.
-	pub fn new(value: u16) -> Result<Self, BinaryGcodeError> {
+	pub const fn new(value: u16) -> Result<Self, BinaryGcodeError> {
 		match value {
 			0 => Ok(Self::FileMetadata),
 			1 => Ok(Self::GCode),
@@ -118,7 +118,7 @@ impl BlockKind {
 	}
 
 	/// Returns the binary representation of the encoding.
-	pub fn to_le_bytes(&self) -> [u8; 2] {
+	pub const fn to_le_bytes(&self) -> [u8; 2] {
 		match *self {
 			BlockKind::FileMetadata => 0u16.to_le_bytes(),
 			BlockKind::GCode => 1u16.to_le_bytes(),
@@ -130,13 +130,13 @@ impl BlockKind {
 	}
 
 	/// Returns a BlockKind or error from a byte representation.
-	pub fn from_le_bytes(bytes: [u8; 2]) -> Result<Self, BinaryGcodeError> {
+	pub const fn from_le_bytes(bytes: [u8; 2]) -> Result<Self, BinaryGcodeError> {
 		let value = u16::from_le_bytes(bytes);
 		BlockKind::new(value)
 	}
 
 	/// Return the expected parameter byte size length.
-	pub fn parameter_byte_size(&self) -> usize {
+	pub const fn parameter_byte_size(&self) -> usize {
 		match *self {
 			BlockKind::Thumbnail => 6,
 			_ => 2,
@@ -144,8 +144,7 @@ impl BlockKind {
 	}
 }
 
-/// Defines the varius compressions algorithms used in
-/// binary gcode.
+/// Defines the various compressions algorithms used in binary gcode.
 #[derive(Debug, PartialEq, Eq)]
 pub enum CompressionAlgorithm {
 	None,
@@ -156,7 +155,7 @@ pub enum CompressionAlgorithm {
 
 impl CompressionAlgorithm {
 	/// Return a compression enum based on a u16.
-	pub fn new(value: u16) -> Result<Self, BinaryGcodeError> {
+	pub const fn new(value: u16) -> Result<Self, BinaryGcodeError> {
 		match value {
 			0 => Ok(Self::None),
 			1 => Ok(Self::Deflate),
@@ -167,7 +166,7 @@ impl CompressionAlgorithm {
 	}
 
 	/// Return the binary representation of the compression algorithm.
-	pub fn to_le_bytes(&self) -> [u8; 2] {
+	pub const fn to_le_bytes(&self) -> [u8; 2] {
 		match *self {
 			CompressionAlgorithm::None => 0u16.to_le_bytes(),
 			CompressionAlgorithm::Deflate => 1u16.to_le_bytes(),
@@ -177,7 +176,7 @@ impl CompressionAlgorithm {
 	}
 
 	/// Return the compression type or error based on a binary representation.
-	pub fn from_le_bytes(bytes: [u8; 2]) -> Result<Self, BinaryGcodeError> {
+	pub const fn from_le_bytes(bytes: [u8; 2]) -> Result<Self, BinaryGcodeError> {
 		let value = u16::from_le_bytes(bytes);
 		CompressionAlgorithm::new(value)
 	}

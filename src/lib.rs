@@ -8,3 +8,6 @@ pub mod common;
 pub mod convert;
 pub mod deserialiser;
 pub mod serialiser;
+
+#[cfg(test)]
+mod tests;
