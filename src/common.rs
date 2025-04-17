@@ -14,6 +14,8 @@ pub enum BinaryGcodeError {
 	UnsupportedEncoding(u16),
 	UnsupportedCompressionAlgorithm(u16),
 	EncodingError(u16),
+	MeatpackError,
+	SerialiseError,
 }
 
 /// The valid checksums for the binary gcode format.
@@ -26,8 +28,8 @@ pub enum Checksum {
 impl Checksum {
 	pub fn to_le_bytes(&self) -> [u8; 2] {
 		match *self {
-			Checksum::None => [0, 0],
-			Checksum::Crc32 => [1, 0],
+			Checksum::None => 0u16.to_be_bytes(),
+			Checksum::Crc32 => 1u16.to_le_bytes(),
 		}
 	}
 
@@ -91,7 +93,7 @@ impl Encoding {
 
 /// Defines the various kinds of block that are
 /// in the binary gcode specification.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum BlockKind {
 	FileMetadata,
 	GCode,
@@ -119,11 +121,11 @@ impl BlockKind {
 	pub fn to_le_bytes(&self) -> [u8; 2] {
 		match *self {
 			BlockKind::FileMetadata => 0u16.to_le_bytes(),
-			BlockKind::GCode => 1u16.to_be_bytes(),
-			BlockKind::SlicerMetadata => 1u16.to_le_bytes(),
-			BlockKind::PrinterMetadata => 2u16.to_le_bytes(),
-			BlockKind::PrintMetadata => 3u16.to_le_bytes(),
-			BlockKind::Thumbnail => 4u16.to_le_bytes(),
+			BlockKind::GCode => 1u16.to_le_bytes(),
+			BlockKind::SlicerMetadata => 2u16.to_le_bytes(),
+			BlockKind::PrinterMetadata => 3u16.to_le_bytes(),
+			BlockKind::PrintMetadata => 4u16.to_le_bytes(),
+			BlockKind::Thumbnail => 5u16.to_le_bytes(),
 		}
 	}
 
@@ -168,7 +170,7 @@ impl CompressionAlgorithm {
 	pub fn to_le_bytes(&self) -> [u8; 2] {
 		match *self {
 			CompressionAlgorithm::None => 0u16.to_le_bytes(),
-			CompressionAlgorithm::Deflate => 1u16.to_be_bytes(),
+			CompressionAlgorithm::Deflate => 1u16.to_le_bytes(),
 			CompressionAlgorithm::Heatshrink11_4 => 2u16.to_le_bytes(),
 			CompressionAlgorithm::Heatshrink12_4 => 3u16.to_le_bytes(),
 		}

@@ -1,7 +1,9 @@
 use core::{array::TryFromSliceError, fmt};
 
 use alloc::{borrow::ToOwned, boxed::Box, vec::Vec};
-use embedded_heatshrink::{HSDPollRes, HeatshrinkDecoder};
+use base64::{prelude::BASE64_STANDARD, Engine};
+use embedded_heatshrink::{HSDFinishRes, HSDPollRes, HSDSinkRes, HeatshrinkDecoder};
+use meatpack::Unpacker;
 use miniz_oxide::inflate::decompress_to_vec_zlib;
 
 use crate::common::{
@@ -154,9 +156,9 @@ impl Deserialiser {
 
 		// Have we collected all the data we need?
 		let block_len = match data_compressed_len {
-			Some(cl) => {
+			Some(compressed_len) => {
 				// header + parameters + comrpessed_len
-				let mut block_len = 12 + param_len + cl;
+				let mut block_len = 12 + param_len + compressed_len;
 				if self.checksum == Checksum::Crc32 {
 					block_len += 4;
 				}
@@ -229,7 +231,7 @@ impl Deserialiser {
 
 #[derive(Debug)]
 pub enum BlockError {
-	DecodeError,
+	DecodeError(&'static str),
 }
 
 /// A struct representing a deserialised binary gcode block.
@@ -268,34 +270,244 @@ impl DeserialisedBlock {
 				if let Ok(o) = output {
 					Ok(o.into_boxed_slice())
 				} else {
-					Err(BlockError::DecodeError)
+					Err(BlockError::DecodeError("deflate"))
 				}
 			}
-			CompressionAlgorithm::Heatshrink11_4 => self.heatshrink(&self.data, 11, 4),
-			CompressionAlgorithm::Heatshrink12_4 => self.heatshrink(&self.data, 12, 4),
+			CompressionAlgorithm::Heatshrink11_4 => {
+				unshrink(&self.data, self.data_uncompressed_len, 11, 4)
+			}
+			CompressionAlgorithm::Heatshrink12_4 => {
+				unshrink(&self.data, self.data_uncompressed_len, 12, 4)
+			}
 		}
 	}
 
-	/// An internal function wrapping around the heatshrink decoder.
-	fn heatshrink(
-		&self,
-		input: &[u8],
-		window: u8,
-		lookahead: u8,
-	) -> Result<Box<[u8]>, BlockError> {
-		let size = input.len() as u16;
-		let mut decoder = HeatshrinkDecoder::new(size, window, lookahead).unwrap();
-		decoder.sink(input);
-		let mut data: Vec<u8> = vec![0; self.data_uncompressed_len];
-		loop {
-			let res = decoder.poll(&mut data);
-			match res {
-				HSDPollRes::Empty(_) => break,
-				HSDPollRes::ErrorNull => return Err(BlockError::DecodeError),
-				HSDPollRes::ErrorUnknown => return Err(BlockError::DecodeError),
-				HSDPollRes::More(_) => {}
+	/// Pumps the decompressed ascii representation
+	/// of the gcode block into a buffer.
+	pub fn to_ascii(
+		&mut self,
+		buf: &mut Vec<u8>,
+	) -> Result<(), BinaryGcodeError> {
+		let data = self.decompress().unwrap();
+		match self.kind {
+			BlockKind::FileMetadata => {
+				buf.extend("; [FILE_METADATA_START]\n".as_bytes());
+				// Handle first byte
+				if data[0] != 59 {
+					buf.extend("; ".as_bytes());
+				}
+				// Handle the window of bytes
+				for win in data.windows(2) {
+					// Check if the next line has already been commented
+					// If not then add one.
+					match win {
+						[10, 59] => buf.push(win[0]),
+						[10, _] => buf.extend("\n; ".as_bytes()),
+						_ => buf.push(win[0]),
+					}
+				}
+				// Make sure we add the last byte
+				buf.push(*data.last().unwrap());
+				// Add a new line.
+				buf.extend("\n; [FILE_METADATA_END]\n".as_bytes());
+			}
+			BlockKind::PrinterMetadata => {
+				buf.extend("; [PRINTER_METADATA_START]\n".as_bytes());
+				// Handle first byte
+				if data[0] != 59 {
+					buf.extend("; ".as_bytes());
+				}
+				// Handle the window of bytes
+				for win in data.windows(2) {
+					// Check if the next line has already been commented
+					// If not then add one.
+					match win {
+						[10, 59] => buf.push(win[0]),
+						[10, _] => buf.extend("\n; ".as_bytes()),
+						_ => buf.push(win[0]),
+					}
+				}
+				// Make sure we add the last byte
+				buf.push(*data.last().unwrap());
+				buf.extend("\n; [PRINTER_METADATA_END]\n".as_bytes());
+			}
+			BlockKind::PrintMetadata => {
+				buf.extend("; [PRINT_METADATA_START]\n".as_bytes());
+				// Handle first byte
+				if data[0] != 59 {
+					buf.extend("; ".as_bytes());
+				}
+				// Handle the window of bytes
+				for win in data.windows(2) {
+					// Check if the next line has already been commented
+					// If not then add one.
+					match win {
+						[10, 59] => buf.push(win[0]),
+						[10, _] => buf.extend("\n; ".as_bytes()),
+						_ => buf.push(win[0]),
+					}
+				}
+				// Make sure we add the last byte
+				buf.push(*data.last().unwrap());
+				buf.extend("\n; [PRINT_METADATA_END]\n".as_bytes());
+			}
+			BlockKind::SlicerMetadata => {
+				buf.extend("; [SLICER_METADATA_START]\n".as_bytes());
+				// Handle first byte
+				if data[0] != 59 {
+					buf.extend("; ".as_bytes());
+				}
+				// Handle the window of bytes
+				for win in data.windows(2) {
+					// Check if the next line has already been commented
+					// If not then add one.
+					match win {
+						[10, 59] => buf.push(win[0]),
+						[10, _] => buf.extend("\n; ".as_bytes()),
+						_ => buf.push(win[0]),
+					}
+				}
+				// Make sure we add the last byte
+				buf.push(*data.last().unwrap());
+				buf.extend("\n; [SLICER_METADATA_END]\n".as_bytes());
+			}
+			BlockKind::Thumbnail => {
+				//buf.resize_with(buf.len() + data.len(), Default::default);
+				let width = try_from_slice::<2>(&self.parameters[2..=3])?;
+				let width = u16::from_le_bytes(width);
+				let height = try_from_slice::<2>(&self.parameters[4..=5])?;
+				let height = u16::from_le_bytes(height);
+
+				buf.extend("; [THUMBNAIL_START]\n".as_bytes());
+				let r = BASE64_STANDARD.encode(&data).into_bytes();
+				match self.encoding {
+					Encoding::PNG => {
+						let header =
+							format!("; thumbnail begin {}x{} {}\n", width, height, r.len());
+						buf.extend(header.as_bytes());
+					}
+					Encoding::JPG => {
+						let header =
+							format!("; thumbnail_JPG begin {}x{} {}\n", width, height, r.len());
+						buf.extend(header.as_bytes());
+					}
+					Encoding::QOI => {
+						let header =
+							format!("; thumbnail_QOI begin {}x{} {}\n", width, height, r.len());
+						buf.extend(header.as_bytes());
+					}
+					_ => {}
+				}
+				// Taking the max row length of 78 from libbgcode
+				for chunk in r.chunks(78) {
+					buf.extend("; ".as_bytes());
+					buf.extend(chunk);
+					buf.push(10);
+				}
+				match self.encoding {
+					Encoding::PNG => buf.extend("; thumbnail end \n;\n".as_bytes()),
+					Encoding::JPG => buf.extend("; thumbnail_JPG end \n;\n".as_bytes()),
+					Encoding::QOI => buf.extend("; thumbnail_QOI end \n;\n".as_bytes()),
+					_ => {}
+				}
+				buf.extend("; [THUMBNAIL_END]\n".as_bytes());
+			}
+			BlockKind::GCode => {
+				buf.extend("; [GCODE_START]\n".as_bytes());
+				match self.encoding {
+					Encoding::ASCII => buf.extend(data),
+					Encoding::Meatpack => {
+						// Use the Meatpack crate to re-encode back to ASCII Gcode.
+						if Unpacker::<64>::unpack_slice(&data, buf).is_err() {
+							return Err(BinaryGcodeError::MeatpackError);
+						}
+					}
+					Encoding::MeatpackWithComments => {
+						if Unpacker::<64>::unpack_slice(&data, buf).is_err() {
+							return Err(BinaryGcodeError::MeatpackError);
+						}
+					}
+					_ => {}
+				}
+				buf.extend("; [GCODE_END]\n".as_bytes());
 			}
 		}
-		Ok(data.into_boxed_slice())
+		Ok(())
 	}
+}
+
+/// An internal function wrapping around the heatshrink decoder.
+fn unshrink(
+	input: &[u8],
+	uncompressed_len: usize,
+	window: u8,
+	lookahead: u8,
+) -> Result<Box<[u8]>, BlockError> {
+	let input_buffer_size = input.len();
+	let mut decoder = HeatshrinkDecoder::new(input_buffer_size as u16, window, lookahead).unwrap();
+	let mut uncompressed: Vec<u8> = vec![0; uncompressed_len];
+	let mut sunk: usize = 0;
+	let mut polled: usize = 0;
+
+	while sunk < input_buffer_size {
+		match decoder.sink(&input[sunk..]) {
+			HSDSinkRes::Ok(sz) => {
+				sunk += sz;
+			}
+			HSDSinkRes::Full => return Err(BlockError::DecodeError("HSDSinkRes::Full")),
+			HSDSinkRes::ErrorNull => return Err(BlockError::DecodeError("HSDSinkRes::ErrorNull")),
+		}
+		loop {
+			let res = decoder.poll(&mut uncompressed[polled..]);
+			match res {
+				HSDPollRes::Empty(sz) => {
+					polled += sz;
+					if sz == 0 {
+						break;
+					}
+				}
+				// Panics after looping for more. Is there a bug where
+				// More is Empty and Empty is More or my interpretation
+				// of what they mean?
+				HSDPollRes::More(sz) => {
+					polled += sz;
+					break;
+				}
+				HSDPollRes::ErrorNull => {
+					return Err(BlockError::DecodeError("HSDPollRes::ErrorNull"))
+				}
+				HSDPollRes::ErrorUnknown => {
+					return Err(BlockError::DecodeError("HSDPollRes::ErrorUnknown"))
+				}
+			}
+		}
+	}
+
+	loop {
+		match decoder.finish() {
+			HSDFinishRes::Done => break,
+			HSDFinishRes::More => match decoder.poll(&mut uncompressed[polled..]) {
+				HSDPollRes::Empty(sz) => {
+					polled += sz;
+					if sz == 0 {
+						break;
+					}
+				}
+				HSDPollRes::More(sz) => {
+					polled += sz;
+				}
+				HSDPollRes::ErrorUnknown => {
+					return Err(BlockError::DecodeError("HSDPollRes::ErrorUnknown"))
+				}
+				HSDPollRes::ErrorNull => {
+					return Err(BlockError::DecodeError("HSDPollRes::ErrorNull"))
+				}
+			},
+			HSDFinishRes::ErrorNull => {
+				return Err(BlockError::DecodeError("HSDFinishRes::ErrorNull"))
+			}
+		}
+	}
+
+	Ok(uncompressed.into_boxed_slice())
 }

@@ -9,13 +9,11 @@ repository = "https://github.com/jamesgopsill/binarygcode"
 readme = "README.md"
 keywords = ["gcode", "MEX", "FDM", "3d_printing"]
 documentation = "https://docs.rs/binarygcode"
-license-file = "LICENSE"
 categories = ["no-std", "parsing"]
 exclude = ["/tmp", "/test_files"]
 
 [dependencies]
 embedded-heatshrink = "0.1.0"
 miniz_oxide = "0.8.5"
-
-[dev-dependencies]
-meatpack = "0.0.1"
+meatpack = { version = "0.0.2", features = ["alloc"] }
+base64 = { version = "0.22.1", default-features = false, features = ["alloc"] }
