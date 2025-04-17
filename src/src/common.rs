@@ -1,5 +1,3 @@
-use alloc::string::String;
-
 /// A pre-defined value in the specification as
 /// part of the file header defined in its u32 form.
 /// ['G', 'C', 'D', 'E'] -> [u8; 4] -> u32
@@ -18,10 +16,6 @@ pub enum BinaryGcodeError {
 	EncodingError(u16),
 	MeatpackError,
 	SerialiseError,
-	// A utility error during development
-	// until to parse out the string as
-	// in no_std mode.
-	DevError(String),
 }
 
 /// The valid checksums for the binary gcode format.

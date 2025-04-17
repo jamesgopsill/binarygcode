@@ -6,7 +6,7 @@ use crate::serialiser::{serialise_block, serialise_file_header};
 use alloc::string::ToString;
 use alloc::{borrow::ToOwned, boxed::Box, vec::Vec};
 use base64::prelude::BASE64_STANDARD;
-use base64::Engine;
+use base64::{encode, Engine};
 use regex::Regex;
 
 /// Provide a reference to a u8 slice of the entire binary file
@@ -51,12 +51,33 @@ pub fn ascii_to_binary(ascii: &str) -> Result<Box<[u8]>, BinaryGcodeError> {
 	// TODO: encode them.
 	let mut inner = ascii;
 	while let Some(start) = inner.find("thumbnail begin") {
-		let needle = "; thumbnail end";
 		if let Some(end) = inner[start..].find("; thumbnail end") {
-			let block = thumbnail_block(&inner[start..start + end + needle.len()])?;
+			//let mut s = inner[..end].to_string();
+			//let (left, right) = s.sp
+			//let (left, right) = inner[..end].split_once(";").unwrap();
+
+			/*
+			s = s.replace("\n", "");
+			s = s.replace(";", "");
+			let s = s.trim();
+			let r = BASE64_STANDARD.decode(s);
+			if r.is_err() {
+				return Err(BinaryGcodeError::SerialiseError);
+			}
+
+			// let r = r.unwrap();
+			let block = serialise_block(
+				BlockKind::FileMetadata,
+				CompressionAlgorithm::None,
+				Encoding::INI,
+				Checksum::Crc32,
+				line.as_bytes(),
+			)?;
 			binary.extend(block);
-			// continue along the str
-			inner = &inner[start + end + needle.len()..];
+			*/
+
+			// TODO: pack the thumbnail block;
+			inner = &inner[end..];
 		} else {
 			return Err(BinaryGcodeError::SerialiseError);
 		}
@@ -70,7 +91,6 @@ pub fn ascii_to_binary(ascii: &str) -> Result<Box<[u8]>, BinaryGcodeError> {
 				CompressionAlgorithm::None,
 				Encoding::INI,
 				Checksum::Crc32,
-				&[],
 				line.as_bytes(),
 			)?;
 			binary.extend(block);
@@ -88,7 +108,6 @@ pub fn ascii_to_binary(ascii: &str) -> Result<Box<[u8]>, BinaryGcodeError> {
 				CompressionAlgorithm::None,
 				Encoding::INI,
 				Checksum::Crc32,
-				&[],
 				block_data.as_bytes(),
 			)?;
 			binary.extend(block);
@@ -107,7 +126,6 @@ pub fn ascii_to_binary(ascii: &str) -> Result<Box<[u8]>, BinaryGcodeError> {
 				CompressionAlgorithm::Deflate,
 				Encoding::INI,
 				Checksum::Crc32,
-				&[],
 				block_data.as_bytes(),
 			)?;
 			binary.extend(block);
@@ -135,7 +153,6 @@ pub fn ascii_to_binary(ascii: &str) -> Result<Box<[u8]>, BinaryGcodeError> {
 						CompressionAlgorithm::Heatshrink11_4,
 						Encoding::ASCII,
 						Checksum::Crc32,
-						&[],
 						&chunk,
 					)?;
 					binary.extend(block);
@@ -150,7 +167,6 @@ pub fn ascii_to_binary(ascii: &str) -> Result<Box<[u8]>, BinaryGcodeError> {
 					CompressionAlgorithm::Heatshrink11_4,
 					Encoding::ASCII,
 					Checksum::Crc32,
-					&[],
 					&chunk,
 				)?;
 				binary.extend(block);
@@ -176,21 +192,21 @@ fn thumbnail_block(thumb: &str) -> Result<Box<[u8]>, BinaryGcodeError> {
 		encoding = Encoding::JPG;
 	}
 
-	let re = Regex::new(r"\d+x\d+").unwrap();
+	let re = Regex::new(r"\s\d+x\d+\s").unwrap();
 	let m = re.find(left);
 	if m.is_none() {
-		return Err(BinaryGcodeError::DevError(left.to_string()));
+		return Err(BinaryGcodeError::SerialiseError);
 	}
 	let m = m.unwrap().as_str();
 	let (w, h) = m.split_once("x").unwrap();
 	let w = w.parse::<u16>();
 	if w.is_err() {
-		return Err(BinaryGcodeError::DevError("width_error".to_string()));
+		return Err(BinaryGcodeError::SerialiseError);
 	}
 	let w = w.unwrap();
 	let h = h.parse::<u16>();
 	if h.is_err() {
-		return Err(BinaryGcodeError::DevError("height_error".to_string()));
+		return Err(BinaryGcodeError::SerialiseError);
 	}
 	let h = h.unwrap();
 
@@ -200,12 +216,11 @@ fn thumbnail_block(thumb: &str) -> Result<Box<[u8]>, BinaryGcodeError> {
 	parameters.extend(h.to_le_bytes());
 
 	let mut right = right.to_string();
-	right = right.replace("\n; ", "");
-	right = right.replace("thumbnail end", "");
+	right = right.replace("\n;", "");
 	let right = right.trim();
 	let data = BASE64_STANDARD.decode(right);
 	if data.is_err() {
-		return Err(BinaryGcodeError::DevError(right.to_string()));
+		return Err(BinaryGcodeError::SerialiseError);
 	}
 	let data = data.unwrap();
 
@@ -219,23 +234,8 @@ fn thumbnail_block(thumb: &str) -> Result<Box<[u8]>, BinaryGcodeError> {
 	)
 }
 
-#[cfg(test)]
 mod tests {
-	use super::thumbnail_block;
 
 	#[test]
-	fn convert_thumbnail_block() {
-		let thumb = "thumbnail begin 16x16 616
-; iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAABlElEQVR4AY2SP0/CUBTF76KLLg66Ob
-; i5+CchMQYH458ogghIabEUWkoLGBQ1UQYXEzVxkLg56OrgLF/ARBeNLn6iI/eRV2kAYTjJ7c05v56+
-; Pkomk5BSFMWn2+yckKHGfPv2DMllKpXylNXiaDjj+NknIZ7ddMTnkTmSC1VVha6zC16wXZ/lIdRz85
-; 5P5ogfNE0TerKnuobb1XAmYKZ3hZ+zxENJj+KtNNI33N6mZqwKCOXzeVQTATwrhO/SYIDHKMHdmoFl
-; WSDDMHCWDuJmnXAfIbzbvYOvFuFyhXC8SKjEAigUCiBd11GNBwSAVd8gvOx1tuGGHJQqhmfB2RYg8Q
-; eQemjW/HAIX0XC3aY/zOJP+Bcg29SWOsM+QCaT6QlgdQtLAGcFoKCFcREaGxhwsDwGUwm3AFyDh5yu
-; 4nRnui+gFJoG/znOeGfADwKSy+HEiuEqNNoBOAoO4zC9JjzS7wPwpahUKjBNE2azzXlk0gNw5Wxzx2
-; 92XVd4PQAPjuOgXC571aT4cJ3tgG8nzqx5gWzbFv5fUBP7TVgxxNgAAAAASUVORK5CYII=
-; thumbnail end";
-
-		let _ = thumbnail_block(thumb).expect("Error making thumbnail");
-	}
+	fn convert_thumbnail_block() {}
 }

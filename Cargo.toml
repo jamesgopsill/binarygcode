@@ -18,6 +18,9 @@ embedded-heatshrink = "0.1.0"
 meatpack = { version = "0.0.2", features = ["alloc"] }
 base64 = { version = "0.22.1", default-features = false, features = ["alloc"] }
 miniz_oxide = "0.8.8"
+regex = { version = "1.11.1", default-features = false, features = [
+	"unicode-perl",
+] }
 
 [dev-dependencies]
 meatpack = "0.0.2"

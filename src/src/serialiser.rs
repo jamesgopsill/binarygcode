@@ -154,7 +154,6 @@ mod test {
 			CompressionAlgorithm::None,
 			Encoding::ASCII,
 			Checksum::Crc32,
-			&[],
 			gcode.as_bytes(),
 		)
 		.unwrap();
@@ -182,7 +181,6 @@ mod test {
 			CompressionAlgorithm::Deflate,
 			Encoding::ASCII,
 			Checksum::Crc32,
-			&[],
 			gcode.as_bytes(),
 		)
 		.unwrap();
@@ -210,7 +208,6 @@ mod test {
 			CompressionAlgorithm::Deflate,
 			Encoding::ASCII,
 			Checksum::None,
-			&[],
 			gcode.as_bytes(),
 		)
 		.unwrap();
