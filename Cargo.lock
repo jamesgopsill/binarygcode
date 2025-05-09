@@ -66,13 +66,15 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "binarygcode"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "base64",
+ "clap",
  "embedded-heatshrink",
  "meatpack",
  "miniz_oxide",
  "regex",
+ "thiserror",
 ]
 
 [[package]]
@@ -141,11 +143,12 @@ checksum = "7943c866cc5cd64cbc25b2e01621d07fa8eb2a1a23160ee81ce38704e97b8ecf"
 
 [[package]]
 name = "meatpack"
-version = "0.0.2"
+version = "0.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9abc7aebc572a409cd9c4fc4dfc0996b3e47d80b8bc9c60a91598ebc9f142600"
+checksum = "350668689311ea16cbd11469786c18dd74148127180a64333e73cc2b607a1136"
 dependencies = [
  "clap",
+ "thiserror",
 ]
 
 [[package]]
@@ -221,6 +224,26 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "thiserror"
+version = "2.0.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "567b8a2dae586314f7be2a752ec7474332959c6460e02bde30d702a66d488708"
+dependencies = [
+ "thiserror-impl",
+]
+
+[[package]]
+name = "thiserror-impl"
+version = "2.0.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f7cf42b4507d8ea322120659672cf1b9dbb93f8f2d4ecfd6e51350ff5b17a1d"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

@@ -4,10 +4,11 @@
 #[macro_use]
 extern crate alloc;
 
-pub mod common;
-pub mod convert;
-pub mod deserialiser;
-pub mod serialiser;
+mod components;
 
-#[cfg(test)]
-mod tests;
+pub use components::common::{BinaryGcodeError, BlockKind, Checksum};
+pub use components::convert::{ascii_to_binary, binary_to_ascii};
+pub use components::deserialiser::{
+    DeserialisedBlock, DeserialisedFileHeader, DeserialisedResult, Deserialiser,
+};
+pub use components::serialiser::{serialise_block, serialise_file_header};
